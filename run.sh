@@ -1,1 +1,1 @@
-go run main.go  run /bin/sh
+go run main.go run /bin/sh
