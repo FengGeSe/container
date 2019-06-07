@@ -23,10 +23,8 @@ golang: 1.12.5
 csdn: [【实现简单的容器】- goalng实现namespace隔离的容器](https://blog.csdn.net/qq_27068845/article/details/90708912 )
 
 ```
-git checkout  
+git checkout 1.0_namespace
 ```
-
-
 
 已实现六种namespace :
 
@@ -42,6 +40,10 @@ git checkout
 #### 2.0 cgroup资源限制
 
 csdn :[【实现简单的容器】- namespace隔离和cgroup资源限制](https://blog.csdn.net/qq_27068845/article/details/91043036)
+
+```
+git checkout 2.0_cgroup
+```
 
 已实现的资源限制：
 
