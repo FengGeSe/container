@@ -22,6 +22,12 @@ golang: 1.12.5
 
 csdn: [【实现简单的容器】- goalng实现namespace隔离的容器](https://blog.csdn.net/qq_27068845/article/details/90708912 )
 
+```
+git checkout  
+```
+
+
+
 已实现六种namespace :
 
 - syscall.CLONE_NEWUTS 隔离主机名和域名
