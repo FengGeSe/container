@@ -52,3 +52,12 @@ git checkout 2.0_cgroup
 
 
 
+#### 2.1cgroup资源限制
+
+```
+git checkout 2.1_cgroup_pipe
+```
+
+添加功能：
+
+- 进程之间通过命名管道(FIFO)传递用户的指令
