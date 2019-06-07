@@ -8,12 +8,20 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 )
 
-var groupName = "mydocker-limit"
+var (
+	groupName = "mydocker-limit"
+
+	// docker run -d busybox top -b
+	// docker export -o busybox.tar (容器ID)
+	// tar -xvf busybox.tar -C /root/busybox
+	imgPath = "/root/busybox"
+)
 
 func main() {
 
@@ -78,6 +86,9 @@ func Run(command string) {
 	cmd.ExtraFiles = []*os.File{read}
 	log.Printf("建立FIFO传递用户命令")
 
+	// 挂载rootfs
+	cmd.Dir = imgPath
+
 	if err := cmd.Start(); err != nil {
 		panic(err)
 	}
@@ -108,6 +119,9 @@ func Init() {
 	command := string(msg)
 	log.Printf("从管道中获取用户的命令: %s", command)
 
+	// 切换root文件系统
+	setUpMount()
+
 	// priviate 方式挂载，不影响宿主机的挂载
 	syscall.Mount("", "/", "", syscall.MS_PRIVATE|syscall.MS_REC, "")
 
@@ -115,8 +129,15 @@ func Init() {
 	mountFlags := syscall.MS_NOEXEC | syscall.MS_NOSUID | syscall.MS_NODEV
 	syscall.Mount("proc", "/proc", "proc", uintptr(mountFlags), "")
 
+	// 调用exec.LookPath
+	cmdArray := strings.Split(command, " ")
+	path, err := exec.LookPath(cmdArray[0])
+	if err != nil {
+		panic(err)
+	}
+
 	// linux execve系统调用: 启动一个新程序，替换原有进程，所以被执行进程的PID不会改变。
-	if err = syscall.Exec(command, []string{command}, os.Environ()); err != nil {
+	if err = syscall.Exec(path, cmdArray[0:], os.Environ()); err != nil {
 		panic(err)
 	}
 	cmd := exec.Command(command)
@@ -124,6 +145,53 @@ func Init() {
 		panic(err)
 	}
 	cmd.Wait()
+}
+
+func setUpMount() {
+	// 当前路径
+	pwd, err := os.Getwd()
+	if err != nil {
+		panic(err)
+		return
+	}
+
+	err = pivotRoot(pwd)
+	if err != nil {
+		panic(err)
+	}
+
+	// mount proc
+	defaultMountFlags := syscall.MS_NOEXEC | syscall.MS_NOSUID | syscall.MS_NODEV
+	syscall.Mount("proc", "/proc", "proc", uintptr(defaultMountFlags), "")
+	syscall.Mount("tmpfs", "/dev", "tmpfs", syscall.MS_NOSUID|syscall.MS_STRICTATIME, "mode=755")
+}
+
+// pivot_root把当前进程的root文件系统放到put_old目录，而使new_root成为新的root文件系统。
+func pivotRoot(root string) error {
+	if err := syscall.Mount(root, root, "bind", syscall.MS_BIND|syscall.MS_REC, ""); err != nil {
+		return fmt.Errorf("Mount rootfs to itself error: %v", err)
+	}
+	// 创建rootfs/.pivot_root存储old_root
+	pivotDir := filepath.Join(root, ".pivot_root")
+	if err := os.Mkdir(pivotDir, 0777); err != nil {
+		return err
+	}
+	// pivot_root到新的rootfs, 老的old_root现在挂载到rootfs/.pivot_root上
+	// 挂载点现在依然能在mount命令中看到
+	if err := syscall.PivotRoot(root, pivotDir); err != nil {
+		return fmt.Errorf("pivot_root %v", err)
+	}
+	// 修改当前工作目录到根目录
+	if err := os.Chdir("/"); err != nil {
+		return fmt.Errorf("chdir error %v", err)
+	}
+
+	pivotDir = filepath.Join("/", ".pivot_root")
+	// unmout rootfs/.pivot_root
+	if err := syscall.Unmount(pivotDir, syscall.MNT_DETACH); err != nil {
+		return fmt.Errorf("umount pivot_root dir error %v", err)
+	}
+	return os.Remove(pivotDir)
 }
 
 // @ pid  要被限制资源的pid
