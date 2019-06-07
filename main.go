@@ -1,9 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"os/exec"
+	"path"
+	"strconv"
+	"strings"
 	"syscall"
 )
 
@@ -59,6 +64,12 @@ func Run(command string) {
 	if err := cmd.Start(); err != nil {
 		panic(err)
 	}
+
+	// 设置cgroup, 限制内存限制和cpu
+	groupName := "mydocker-limit"
+	SetCgroups(groupName, cmd.Process.Pid, "50m", "512")
+	defer RemoveCgroups(groupName)
+
 	cmd.Wait()
 }
 
@@ -82,4 +93,108 @@ func Init(command string) {
 		panic(err)
 	}
 	cmd.Wait()
+}
+
+// @ pid  要被限制资源的pid
+// @ memoryLimit memory.limit_in_bytes  内存限制
+// @ cpuShare cpu.shares  CPU时间片权重
+func SetCgroups(groupName string, pid int, memoryLimit, cpuShare string) {
+	// memory.limit_in_bytes
+	err := AddSubsystemLimit(pid, groupName, "memory", "memory.limit_in_bytes", memoryLimit)
+	if err != nil {
+		panic(err)
+	}
+
+	// cpu.shares
+	err = AddSubsystemLimit(pid, groupName, "cpu", "cpu.shares", cpuShare)
+	if err != nil {
+		panic(err)
+	}
+}
+
+// 移除cgroups
+func RemoveCgroups(group string) {
+	// 移除memory
+	memoryCgroupPath, err := GetCgroupPath("memory", group, false)
+	if err != nil {
+		panic(err)
+	}
+	err = os.Remove(memoryCgroupPath)
+	if err != nil {
+		panic(err)
+	}
+
+	// 移除cpu
+	cpuCgroupPath, err := GetCgroupPath("cpu", group, false)
+	if err != nil {
+		panic(err)
+	}
+	err = os.Remove(cpuCgroupPath)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func AddSubsystemLimit(pid int, group, subsystem, item, limit string) error {
+	// 1. 获得cgroup的绝对路径，不存在则创建
+	cgroupPath, err := GetCgroupPath(subsystem, group, true)
+	if err != nil {
+		return err
+	}
+
+	// 2. 写入限制
+	err = ioutil.WriteFile(path.Join(cgroupPath, item), []byte(limit), 0644)
+	if err != nil {
+		return err
+	}
+
+	// 3. 将pid加入
+	err = ioutil.WriteFile(path.Join(cgroupPath, "tasks"), []byte(strconv.Itoa(pid)), 0644)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// 通过/proc/self/mountinfo找出某个subsystem的hierarchy cgroup根节点所在的目录
+func FindCgroupMountpoint(subsystem string) string {
+	f, err := os.Open("/proc/self/mountinfo")
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		txt := scanner.Text()
+		fields := strings.Split(txt, " ")
+		for _, opt := range strings.Split(fields[len(fields)-1], ",") {
+			if opt == subsystem {
+				return fields[4]
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return ""
+	}
+	return ""
+}
+
+// 得到cgroup在文件系统中的绝对路径
+func GetCgroupPath(subsystem, cgroupPath string, autoCreate bool) (string, error) {
+	cgroupRoot := FindCgroupMountpoint(subsystem)
+	if cgroupRoot == "" {
+		panic("不能是空")
+	}
+	if _, err := os.Stat(path.Join(cgroupRoot, cgroupPath)); err == nil || (autoCreate && os.IsNotExist(err)) {
+		if os.IsNotExist(err) {
+			if err := os.Mkdir(path.Join(cgroupRoot, cgroupPath), 0755); err == nil {
+			} else {
+				return "", fmt.Errorf("err create cgroup %v", err)
+			}
+		}
+		return path.Join(cgroupRoot, cgroupPath), nil
+	} else {
+		return "", fmt.Errorf("cgroup path error %v", err)
+	}
 }
