@@ -83,3 +83,14 @@ git checkout 3.0_busybox
 
 - 容器内的目录修改为busybox的文件系统
 
+  
+
+#### 4.0 使用 AUFS 包装 busybox
+
+```
+git checkout 4.0_aufs
+```
+
+添加功能：
+
+- 分离读写层，退出删除工作空间
