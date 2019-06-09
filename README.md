@@ -52,7 +52,7 @@ git checkout 2.0_cgroup
 
 
 
-#### 2.1cgroup资源限制
+#### 2.1 cgroup资源限制
 
 ```
 git checkout 2.1_cgroup_pipe
@@ -61,3 +61,25 @@ git checkout 2.1_cgroup_pipe
 添加功能：
 
 - 进程之间通过命名管道(FIFO)传递用户的指令
+
+
+
+#### 3.0 busybox镜像
+
+获得busybox的rootfs:
+
+```
+docker pull busybox
+docker run busybox top -b
+docker export -o busybox.tar (容器ID)
+tar -xvf busybox.tar -C /root/busybox
+```
+
+```
+git checkout 3.0_busybox
+```
+
+添加功能：
+
+- 容器内的目录修改为busybox的文件系统
+
