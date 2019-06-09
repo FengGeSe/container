@@ -21,6 +21,9 @@ var (
 	// docker export -o busybox.tar (容器ID)
 	// tar -xvf busybox.tar -C /root/busybox
 	imgPath = "/root/busybox"
+
+	mntURL  = "/root/mnt/"
+	rootURL = "/root/"
 )
 
 func main() {
@@ -86,8 +89,11 @@ func Run(command string) {
 	cmd.ExtraFiles = []*os.File{read}
 	log.Printf("建立FIFO传递用户命令")
 
+	// 创建aufs工作区
+	NewWorkSpace(rootURL, mntURL)
+	log.Printf("建立AUFS文件系统的工作区")
 	// 挂载rootfs
-	cmd.Dir = imgPath
+	cmd.Dir = mntURL
 
 	if err := cmd.Start(); err != nil {
 		panic(err)
@@ -102,6 +108,11 @@ func Run(command string) {
 	defer RemoveCgroups(groupName)
 
 	cmd.Wait()
+
+	// 退出 删除
+	DeleteWorkSpace(rootURL, mntURL)
+	log.Printf("容器退出，清空工作区！")
+	os.Exit(0)
 }
 
 // 初始化容器
@@ -295,5 +306,65 @@ func GetCgroupPath(subsystem, cgroupPath string, autoCreate bool) (string, error
 		return path.Join(cgroupRoot, cgroupPath), nil
 	} else {
 		return "", fmt.Errorf("cgroup path error %v", err)
+	}
+}
+
+// 创建只读层和可写层
+func NewWorkSpace(rootURL, mntURL string) {
+	// create read only layer
+	busyboxURL := rootURL + "busybox/"
+	busyboxTarURL := rootURL + "busybox.tar"
+	isExist := true
+	_, err := os.Stat(busyboxURL)
+	if err != nil && os.IsNotExist(err) {
+		if os.IsNotExist(err) {
+			isExist = false
+		} else {
+			panic(err)
+		}
+	}
+	if !isExist {
+		if err = os.Mkdir(busyboxURL, 0777); err != nil {
+			panic(err)
+		}
+		if _, err = exec.Command("tar", "-xvf", busyboxTarURL, "-C", busyboxURL).CombinedOutput(); err != nil {
+			panic(err)
+		}
+	}
+	// create write layer
+	if err = os.Mkdir(mntURL, 0777); err != nil {
+		panic(err)
+	}
+	writeURL := rootURL + "writeLayer/"
+	if err = os.Mkdir(writeURL, 0777); err != nil {
+		panic(err)
+	}
+	// create mount point
+	dirs := "dirs=" + rootURL + "writeLayer:" + rootURL + "busybox"
+	cmd := exec.Command("mount", "-t", "aufs", "-o", dirs, "none", mntURL)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err = cmd.Run(); err != nil {
+		panic(err)
+	}
+}
+
+// 删除
+func DeleteWorkSpace(rootURL, mntURL string) {
+	// delete mount point
+	cmd := exec.Command("umount", mntURL)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		panic(err)
+	}
+	if err := os.RemoveAll(mntURL); err != nil {
+		panic(err)
+	}
+
+	// delete write layer
+	writeURL := rootURL + "writeLayer/"
+	if err := os.RemoveAll(writeURL); err != nil {
+		panic(err)
 	}
 }
